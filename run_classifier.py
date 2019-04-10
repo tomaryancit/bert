@@ -297,7 +297,7 @@ class MnliProcessor(DataProcessor):
     return examples
 
 
-class AgnewsProcessor(DataProcessor):
+class IsearProcessor(DataProcessor):
   """Processor for the MultiNLI data set (GLUE version)."""
 
   def get_train_examples(self, data_dir):
@@ -319,10 +319,13 @@ class AgnewsProcessor(DataProcessor):
   def get_labels(self):
     """See base class."""
     return [
-      "World",
-      "Entertainment",
-      "Sports",
-      "Business",
+      "anger",
+      "disgust",
+      "fear",
+      "guilt",
+      "joy",
+      "sadness",
+      "shame"
     ]
 
   def _create_examples(self, lines, set_type):
@@ -339,7 +342,7 @@ class AgnewsProcessor(DataProcessor):
     guid = "%s-%s" % (set_type, tokenization.convert_to_unicode(line[0]))
     text_a = tokenization.convert_to_unicode(line[1])
     if set_type == "test":
-      label = "World"
+      label = "joy"
     else:
       label = tokenization.convert_to_unicode(line[-1])
     single_example = InputExample(guid=guid, text_a=text_a, label=label)
@@ -836,16 +839,15 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
     features.append(feature)
   return features
 
-
 def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
-
+  
   processors = {
       "cola": ColaProcessor,
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
-      "agne": AgnewsProcessor,
+      "isear": IsearProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
@@ -1033,23 +1035,59 @@ def main(_):
 
   if FLAGS.do_serve:
 
-    def serving_input_fn():
-      with tf.variable_scope("foo"):
-        feature_spec = {
-            "input_ids": tf.FixedLenFeature([FLAGS.max_seq_length], tf.int64),
-            "input_mask": tf.FixedLenFeature([FLAGS.max_seq_length], tf.int64),
-            "segment_ids": tf.FixedLenFeature([FLAGS.max_seq_length], tf.int64),
-            "label_ids": tf.FixedLenFeature([], tf.int64),
-          }
-        serialized_tf_example = tf.placeholder(dtype=tf.string,
-                                               shape=[None],
-                                               name='input_example_tensor')
-        receiver_tensors = {'examples': serialized_tf_example}
-        features = tf.parse_example(serialized_tf_example, feature_spec)
-        return tf.estimator.export.ServingInputReceiver(features, receiver_tensors)
+    feature_spec = {
+        "input_ids": tf.FixedLenFeature([FLAGS.max_seq_length], tf.int64),
+        "input_mask": tf.FixedLenFeature([FLAGS.max_seq_length], tf.int64),
+        "segment_ids": tf.FixedLenFeature([FLAGS.max_seq_length], tf.int64),
+        "label_ids": tf.FixedLenFeature([], tf.int64),
+        "is_real_example": tf.FixedLenFeature([], tf.int64)
+      }
+
+    def serving_input_receiver_fn():      
+      serialized_tf_example = tf.placeholder(dtype=tf.string,
+                                              shape=[None],
+                                              name='input_example_tensor')
+      receiver_tensors = {'examples': serialized_tf_example}
+      features = tf.parse_example(serialized_tf_example, feature_spec)
+
+      return tf.estimator.export.ServingInputReceiver(features, receiver_tensors)
+
+    #08-04-2019
+    #Try raw again but without the mask , as its already masked!
+    #ERROR:
+    # File "/azureml-envs/azureml_375c9c40c6245228f2ad32b89cddb31c/lib/python3.6/site-packages/tensorflow/python/estimator/estimator.py", line 894, in _add_meta_graph_for_mode
+    # features=input_receiver.features,
+    # AttributeError: 'function' object has no attribute 'features'
+    # Error occurred: InternalServerError
+    #
+    # def serving_input_receiver_fn():      
+    #   feature_placeholder = tf.placeholder(dtype=tf.string,
+    #                                           shape=[None],
+    #                                           name='input_example_tensor')
+
+    #   return tf.estimator.export.build_raw_serving_input_receiver_fn(feature_placeholder)
+
+
+  # #Tried using build_raw_serving_input_receiver_fn but still returns the same prediction values.
+  #   def serving_input_receiver_fn():
+  #       label_ids = tf.placeholder(tf.int32, [None], name='label_ids')
+  #       input_ids = tf.placeholder(tf.int32, [None, FLAGS.max_seq_length], name='input_ids')
+  #       input_mask = tf.placeholder(tf.int32, [None, FLAGS.max_seq_length], name='input_mask')
+  #       segment_ids = tf.placeholder(tf.int32, [None, FLAGS.max_seq_length], name='segment_ids')
+  #       input_fn = tf.estimator.export.build_raw_serving_input_receiver_fn({
+  #           'label_ids': label_ids,
+  #           'input_ids': input_ids,
+  #           'input_mask': input_mask,
+  #           'segment_ids': segment_ids,
+  #       })()
+  #       return input_fn
+
+    tf.logging.info("***** Running new serve *****")
 
     estimator._export_to_tpu = False  # this is important
-    path = estimator.export_savedmodel('export_t', serving_input_fn)
+    #path = estimator.export_savedmodel('export_t', serving_input_fn)
+    #path = estimator.export_savedmodel(FLAGS.output_dir, serving_input_receiver_fn, strip_default_attrs=True)
+    path = estimator.export_savedmodel(FLAGS.output_dir, serving_input_receiver_fn)
     print(path)
 
 if __name__ == "__main__":
